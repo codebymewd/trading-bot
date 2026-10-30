@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrendBot — Trading Terminal</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">TrendBot <span class="ver">v0.1</span></div>
+  <div class="statuschips">
+    <span id="chip-backend" class="chip">Backend: …</span>
+    <span id="chip-ea" class="chip">EA: …</span>
+    <span id="chip-trading" class="chip">Trading: …</span>
+  </div>
+  <div class="acctsel">
+    <label for="account-select">Account:</label>
+    <select id="account-select"></select>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button class="tab active" data-tab="overview">Overview</button>
+  <button class="tab" data-tab="risk">Prop-Firm Risk</button>
+  <button class="tab" data-tab="positions">Positions</button>
+  <button class="tab" data-tab="history">History</button>
+  <button class="tab" data-tab="activity">Activity</button>
+  <button class="tab" data-tab="accounts">Accounts</button>
+  <button class="tab" data-tab="settings">Settings</button>
+</nav>
+
+<main>
+  <!-- OVERVIEW -->
+  <section id="tab-overview" class="panel">
+    <div id="blocked-banner" class="banner hidden"></div>
+    <div class="cards" id="overview-cards"></div>
+    <div class="grid2">
+      <div class="box"><h3>Open Positions</h3><div id="ov-positions" class="tablewrap"></div></div>
+      <div class="box"><h3>Recent Activity</h3><div id="ov-activity" class="feed"></div></div>
+    </div>
+  </section>
+
+  <!-- RISK -->
+  <section id="tab-risk" class="panel hidden">
+    <div class="grid2">
+      <div class="box">
+        <h3>Overall Drawdown</h3>
+        <div class="meter"><div id="dd-meter" class="meterfill"></div></div>
+        <div id="dd-meter-label" class="meterlabel"></div>
+      </div>
+      <div class="box">
+        <h3>Daily Drawdown</h3>
+        <div class="meter daily"><div id="daily-meter" class="meterfill"></div></div>
+        <div id="daily-meter-label" class="meterlabel"></div>
+      </div>
+    </div>
+    <div class="box"><h3>Prop-Firm Risk Panel</h3><div id="risk-table" class="kvgrid"></div></div>
+  </section>
+
+  <!-- POSITIONS -->
+  <section id="tab-positions" class="panel hidden">
+    <div class="toolbar">
+      <button id="btn-close-all" class="danger">Emergency Stop (close all)</button>
+    </div>
+    <div id="positions-table" class="tablewrap"></div>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="tab-history" class="panel hidden">
+    <div class="toolbar">
+      <input id="hist-symbol" placeholder="Symbol filter">
+      <select id="hist-result"><option value="">All results</option><option>WIN</option><option>LOSS</option></select>
+      <button id="hist-refresh">Apply</button>
+    </div>
+    <div id="history-table" class="tablewrap"></div>
+  </section>
+
+  <!-- ACTIVITY -->
+  <section id="tab-activity" class="panel hidden">
+    <div id="activity-feed" class="feed tall"></div>
+  </section>
+
+  <!-- ACCOUNTS -->
+  <section id="tab-accounts" class="panel hidden">
+    <div class="toolbar"><button id="btn-add-account" class="primary">+ Add Account</button></div>
+    <div id="accounts-table" class="tablewrap"></div>
+    <div id="account-form" class="box hidden">
+      <h3>New Account</h3>
+      <div class="formgrid">
+        <label>Name <input id="acc-name" placeholder="FTMO 10K"></label>
+        <label>Broker <input id="acc-broker" placeholder="FTMO"></label>
+        <label>MT5 Login <input id="acc-login" type="number" placeholder="12345678"></label>
+        <label>Type <select id="acc-type"><option value="demo">demo</option><option value="live">live</option></select></label>
+        <label>Initial Balance <input id="acc-initial" type="number" placeholder="10000"></label>
+        <label>Currency <input id="acc-currency" value="USD"></label>
+        <label>Prop Profile
+          <select id="acc-prop">
+            <option value="">Custom / none</option>
+            <option value="ftmo_10k">FTMO 10K</option>
+            <option value="ftmo_25k">FTMO 25K</option>
+            <option value="ftmo_50k">FTMO 50K</option>
+            <option value="ftmo_100k">FTMO 100K</option>
+          </select>
+        </label>
+      </div>
+      <div class="formactions">
+        <button id="acc-save" class="primary">Create</button>
+        <button id="acc-cancel">Cancel</button>
+        <span id="acc-form-msg" class="msg"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="panel hidden">
+    <div class="box">
+      <h3>Configuration Sync</h3>
+      <div id="cfg-sync" class="kvinline"></div>
+    </div>
+    <div id="settings-groups"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

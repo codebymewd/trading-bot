@@ -140,7 +140,7 @@ def build_overview(service, acc) -> Dict[str, Any]:
                  "daily_used_pct": None if daily_pct is None else round(daily_pct, 1),
                  "overall_status": level(overall_pct), "daily_status": level(daily_pct)},
         "stats": {"risk_percent": cfg.risk.risk_percent, "target_multiplier": cfg.scalp.target_multiplier,
-                  "trades_today": store.counters.trades_opened, "max_trades_per_day": cfg.daily.max_baskets_per_day,
+                  "trades_today": store.counters.trades_opened, "max_trades_per_day": cfg.daily.max_trades_per_day,
                   "consecutive_losses": store.counters.consecutive_losses,
                   "win_rate": (round(wins / total * 100.0, 1) if total else None),
                   "locked_out": store.counters.locked_out},
@@ -359,14 +359,34 @@ def register_api(app: FastAPI, service, token_provider) -> None:
             return err
         body = await request.json()
         key, value = str(body.get("key", "")), str(body.get("value", ""))
-        res = service.cfg.propose("dashboard", key, value)
-        if not res.ok and res.message == f"Unknown setting '{key}'.":
-            return JSONResponse({"error": res.message}, status_code=400)
-        if res.proposal_id and body.get("confirm"):
-            res = service.cfg.confirm("dashboard", res.proposal_id)
+        s = SETTINGS.get(key)
+        if s is not None and s.kind == "toggle":
+            # dashboard sends the FULL desired list ("RSI,MACD,BB"); apply as a set via propose_custom
+            want = [x.strip() for x in value.replace(";", ",").split(",") if x.strip()]
+            from .settings import get_path
+            cur_list = get_path(service.cfg.view(), s.path)
+
+            def mutate(data, _s=s, _want=want):
+                got = [c for c in _s.choices if c.lower() in {w.lower() for w in _want}]
+                bad = [w for w in _want if w.lower() not in {c.lower() for c in _s.choices}]
+                if bad:
+                    raise ValueError("choose from: " + ", ".join(_s.choices))
+                data_set = set(got)
+                lst = [c for c in _s.choices if c in data_set]
+                if not lst:
+                    raise ValueError("at least one must stay enabled")
+                from .settings import set_path
+                set_path(data, _s.path, lst)
+            res = service.cfg.propose_custom("dashboard", key, f"{s.label} -> {', '.join(want)}", mutate, always_confirm=False)
+        else:
+            res = service.cfg.propose("dashboard", key, value)
+        pid = res.proposal.id if res.proposal else None
+        if pid and body.get("confirm"):
+            res = service.cfg.confirm("dashboard", pid)
+            pid = res.proposal.id if res.proposal else pid
         return {"ok": res.ok, "message": res.message,
-                "proposal_id": getattr(res, "proposal_id", None),
-                "needs_confirmation": not res.ok and "confirm" in res.message.lower(),
+                "proposal_id": pid,
+                "needs_confirmation": not res.ok and ("confirm" in res.message.lower() or "again" in res.message.lower()),
                 "version": service.cfg.current.config_version,
                 "applied_version": service.cfg.applied_version}
 
