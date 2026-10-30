@@ -1,0 +1,83 @@
+/* TrendBot dashboard — dark trading-terminal theme */
+:root{
+  --bg:#0b0e14; --panel:#121722; --box:#161c2a; --line:#232b3d;
+  --text:#d8dee9; --muted:#7c8698; --accent:#4f8cff;
+  --green:#2ecc8f; --amber:#f5b942; --red:#ff5566;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 "Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.hidden{display:none!important}
+
+#topbar{display:flex;align-items:center;gap:16px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{font-size:19px;font-weight:700;letter-spacing:.5px;color:#fff}
+.ver{font-size:11px;color:var(--muted);font-weight:400}
+.statuschips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{padding:4px 10px;border-radius:12px;background:var(--box);border:1px solid var(--line);font-size:12px;color:var(--muted)}
+.chip.ok{color:var(--green);border-color:#1d4436}
+.chip.warn{color:var(--amber);border-color:#4d3d18}
+.chip.bad{color:var(--red);border-color:#4d222b}
+.acctsel{margin-left:auto;display:flex;align-items:center;gap:8px}
+select,input{background:var(--box);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit}
+select:focus,input:focus{outline:1px solid var(--accent)}
+
+#tabs{display:flex;gap:4px;padding:8px 18px;background:var(--bg);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{background:transparent;border:1px solid transparent;color:var(--muted);padding:7px 14px;border-radius:8px;cursor:pointer;font:inherit}
+.tab:hover{color:var(--text)}
+.tab.active{background:var(--panel);color:#fff;border-color:var(--line)}
+
+main{padding:18px;max-width:1400px;margin:0 auto}
+.banner{padding:10px 14px;border-radius:8px;margin-bottom:14px;background:#3a1620;border:1px solid #5c2230;color:#ffb3bf}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.card{background:var(--box);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card .k{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+.card .v{font-size:20px;font-weight:600;margin-top:4px}
+.card .s{font-size:11px;margin-top:2px}
+.v.pos{color:var(--green)} .v.neg{color:var(--red)}
+.s.SAFE{color:var(--green)} .s.WARNING{color:var(--amber)} .s.BLOCKED{color:var(--red)}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.box h3{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:10px}
+
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:var(--muted);text-align:left;font-weight:500;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid #1a2130;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+.buy{color:var(--green);font-weight:600}.sell{color:var(--red);font-weight:600}
+
+.feed{max-height:320px;overflow-y:auto;font-family:Consolas,monospace;font-size:12px}
+.feed.tall{max-height:70vh}
+.ev{display:flex;gap:10px;padding:4px 6px;border-bottom:1px dashed #1a2130}
+.ev .t{color:var(--muted);flex-shrink:0}
+.ev.blocked{color:#ffb3bf}.ev.pass{color:#b9f5d8}.ev.trade{color:#cfe2ff}.ev.info{color:var(--text)}
+
+.meter{height:22px;background:#0e1320;border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.meterfill{height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--amber) 60%,var(--red) 85%);transition:width .4s}
+.meterlabel{margin-top:8px;font-size:13px;color:var(--muted)}
+.kvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.kv{display:flex;justify-content:space-between;background:var(--box);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.kv .l{color:var(--muted)} .kv .r{font-weight:600}
+.kvinline{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.kvinline b{color:var(--text)}
+
+.toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+button{background:var(--box);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{background:#3a1620;border-color:#5c2230;color:#ffb3bf}
+button.small{padding:3px 9px;font-size:12px;border-radius:6px}
+.formgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.formgrid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.formactions{display:flex;gap:10px;align-items:center;margin-top:12px}
+.msg{font-size:12px;color:var(--amber)}
+.settingrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed #1a2130;flex-wrap:wrap}
+.settingrow .lbl{flex:1;min-width:180px}
+.settingrow .lbl small{display:block;color:var(--muted)}
+.applied{font-size:11px;padding:2px 8px;border-radius:10px}
+.applied.yes{color:var(--green);background:#123324}
+.applied.no{color:var(--amber);background:#332a12}
+
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--accent);padding:10px 18px;border-radius:10px;z-index:50;max-width:80vw}
+.toast.err{border-color:var(--red)}

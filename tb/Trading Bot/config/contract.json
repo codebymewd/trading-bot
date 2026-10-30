@@ -1,0 +1,309 @@
+{
+  "schema_version": 3,
+  "enums": {
+    "mode": [
+      "SIGNAL_ONLY",
+      "DEMO",
+      "LIVE"
+    ],
+    "entry_mode": [
+      "market_confirmed"
+    ],
+    "htf_mode": [
+      "H4_AND_D1",
+      "H4_ONLY"
+    ],
+    "execution_tf": [
+      "M1",
+      "M5"
+    ],
+    "be_method": [
+      "off",
+      "A",
+      "B",
+      "C"
+    ],
+    "setup_tf": [
+      "M15",
+      "M30",
+      "H1"
+    ],
+    "timeout_action": [
+      "CLOSE_ALL",
+      "MOVE_TO_BREAKEVEN",
+      "KEEP_RUNNING",
+      "CLOSE_IF_LOSS"
+    ],
+    "indicators": [
+      "MACD",
+      "STOCH",
+      "BB",
+      "RSI",
+      "CCI"
+    ]
+  },
+  "ranges": {
+    "reset_minutes": [
+      0,
+      1439
+    ],
+    "reset_utc_offset_seconds": [
+      -43200,
+      50400
+    ],
+    "target_multiplier": [
+      0.5,
+      10.0
+    ],
+    "scalp_window_minutes": [
+      1,
+      240
+    ],
+    "max_positions_per_basket": [
+      1,
+      10
+    ]
+  },
+  "minimums": {
+    "risk_percent_exclusive": 0.0,
+    "max_open_risk_percent_exclusive": 0.0,
+    "max_simultaneous_positions": 1,
+    "max_trades_per_day": 1,
+    "lockout_after_losses": 1
+  },
+  "defaults": {
+    "mode": "SIGNAL_ONLY",
+    "live_confirmed": false,
+    "risk_percent": 1.0,
+    "max_open_risk_percent": 1.0,
+    "max_simultaneous_positions": 1,
+    "htf_mode": "H4_AND_D1",
+    "entry_mode": "market_confirmed",
+    "sweep_required": false,
+    "reset_timezone": "Africa/Lagos",
+    "reset_time": "00:00",
+    "reset_utc_offset_seconds": 3600,
+    "max_trades_per_day": 2,
+    "lockout_after_losses": 2,
+    "broker": "Exness",
+    "target_multiplier": 3.0,
+    "execution_tf": "M5",
+    "setup_tf": "M15",
+    "scalp_window_minutes": 15,
+    "timeout_action": "CLOSE_ALL",
+    "max_positions_per_basket": 1,
+    "minimum_confirmations": 3,
+    "enabled_indicator_count": 4,
+    "break_even_method": "off"
+  },
+  "invalid_cases": [
+    {
+      "name": "mult_below_min",
+      "path": [
+        "scalp",
+        "target_multiplier"
+      ],
+      "value": 0.4
+    },
+    {
+      "name": "mult_above_max",
+      "path": [
+        "scalp",
+        "target_multiplier"
+      ],
+      "value": 10.1
+    },
+    {
+      "name": "mult_zero",
+      "path": [
+        "scalp",
+        "target_multiplier"
+      ],
+      "value": 0
+    },
+    {
+      "name": "window_zero",
+      "path": [
+        "scalp",
+        "scalp_window_minutes"
+      ],
+      "value": 0
+    },
+    {
+      "name": "window_too_long",
+      "path": [
+        "scalp",
+        "scalp_window_minutes"
+      ],
+      "value": 241
+    },
+    {
+      "name": "bad_timeout_action",
+      "path": [
+        "scalp",
+        "timeout_action"
+      ],
+      "value": "HOLD_FOREVER"
+    },
+    {
+      "name": "basket_positions_zero",
+      "path": [
+        "scalp",
+        "max_positions_per_basket"
+      ],
+      "value": 0
+    },
+    {
+      "name": "min_confirm_exceeds_enabled",
+      "path": [
+        "confirmation",
+        "minimum_confirmations"
+      ],
+      "value": 9
+    },
+    {
+      "name": "risk_zero",
+      "path": [
+        "risk",
+        "risk_percent"
+      ],
+      "value": 0
+    },
+    {
+      "name": "risk_negative",
+      "path": [
+        "risk",
+        "risk_percent"
+      ],
+      "value": -1
+    },
+    {
+      "name": "positions_zero",
+      "path": [
+        "risk",
+        "max_simultaneous_positions"
+      ],
+      "value": 0
+    },
+    {
+      "name": "bad_entry_mode",
+      "path": [
+        "entry",
+        "entry_mode"
+      ],
+      "value": "market_anywhere"
+    },
+    {
+      "name": "old_pending_entry_mode",
+      "path": [
+        "entry",
+        "entry_mode"
+      ],
+      "value": "fvg_50"
+    },
+    {
+      "name": "bad_htf_mode",
+      "path": [
+        "structure",
+        "htf_mode"
+      ],
+      "value": "H1_ONLY"
+    },
+    {
+      "name": "bad_exec_tf",
+      "path": [
+        "structure",
+        "execution_tf"
+      ],
+      "value": "H1"
+    },
+    {
+      "name": "bad_setup_tf",
+      "path": [
+        "structure",
+        "setup_tf"
+      ],
+      "value": "M5"
+    },
+    {
+      "name": "bad_mode",
+      "path": [
+        "mode"
+      ],
+      "value": "PAPER"
+    },
+    {
+      "name": "max_trades_zero",
+      "path": [
+        "daily",
+        "max_trades_per_day"
+      ],
+      "value": 0
+    }
+  ],
+  "trading_day_vectors": [
+    {
+      "name": "wat_before_midnight",
+      "utc": "2026-10-19T22:59:59Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2026-10-19"
+    },
+    {
+      "name": "wat_midnight_rolls",
+      "utc": "2026-10-19T23:00:00Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2026-10-20"
+    },
+    {
+      "name": "utc_midnight_does_not_roll",
+      "utc": "2026-10-20T00:00:00Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2026-10-20"
+    },
+    {
+      "name": "utc_midnight_mid_wat_day",
+      "utc": "2026-10-19T00:00:00Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2026-10-19"
+    },
+    {
+      "name": "wat_noon",
+      "utc": "2026-10-19T11:00:00Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2026-10-19"
+    },
+    {
+      "name": "year_end",
+      "utc": "2026-12-31T23:00:00Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2027-01-01"
+    },
+    {
+      "name": "leap_day",
+      "utc": "2028-02-28T23:00:00Z",
+      "offset": 3600,
+      "reset": "00:00",
+      "label": "2028-02-29"
+    },
+    {
+      "name": "custom_reset_0600",
+      "utc": "2026-10-19T04:59:59Z",
+      "offset": 3600,
+      "reset": "06:00",
+      "label": "2026-10-18"
+    },
+    {
+      "name": "custom_reset_0600_rolls",
+      "utc": "2026-10-19T05:00:00Z",
+      "offset": 3600,
+      "reset": "06:00",
+      "label": "2026-10-19"
+    }
+  ]
+}
