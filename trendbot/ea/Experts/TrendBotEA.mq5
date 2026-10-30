@@ -1,22 +1,27 @@
 //+------------------------------------------------------------------+
-//| TrendBotEA.mq5 - PHASE 1: backend connection (NO TRADING CODE)   |
+//| TrendBotEA.mq5 - PHASE 2: backend connection + REAL trading      |
 //| Sends signed heartbeats, receives and validates configuration,   |
-//| acknowledges it, executes PAUSE/RESUME/SHUTDOWN, uploads events. |
-//| There is no OrderSend/CTrade anywhere in this EA version.        |
-//| Not yet compiled in MetaEditor.                                  |
+//| acknowledges it, executes commands (PAUSE/RESUME/CLOSE/...),     |
+//| runs the TrendBot scalp engine on CLOSED candles only, and       |
+//| places real market orders via OrderSend after a final EA-side    |
+//| safety gate. The EA is the final execution authority.            |
+//| LIVE mode remains hard-blocked here until explicitly unlocked.   |
 //+------------------------------------------------------------------+
 #property strict
-#property version     "1.000"
-#property description "TrendBot EA - backend connection phase. Cannot place orders."
+#property version     "2.000"
+#property description "TrendBot EA - automated DEMO trading with backend control."
 
 #include <TrendBot/TrendBotComm.mqh>
 #include <TrendBot/TrendBotRuntime.mqh>
+#include <TrendBot/TrendBotTrade.mqh>
 
 input string InpBackendUrl       = "http://127.0.0.1:8000";   // must be added under Tools > Options > Expert Advisors > Allow WebRequest
 input string InpSecretFile       = "TrendBot_secret.txt";     // in MQL5\Files; first line = your TB_EA_SECRET
 input int    InpHeartbeatSeconds = 10;                        // used until the backend configuration arrives
 input bool   InpReportAllSymbols = false;                     // false = only symbols in Market Watch
 input int    InpMaxSymbols       = 300;
+input int    InpDeviationPoints  = 20;                        // max slippage in points for market orders
+input int    InpHistoryBars      = 400;                       // bars loaded per timeframe for the engine
 
 string     g_secret = "";
 TB_Runtime g_rt;
@@ -36,6 +41,297 @@ ulong      g_rejected_ms = 0;
 string     g_done_cmds[];
 int        g_ndone = 0;
 
+//--- trading state (candle-close gate + duplicate protection) -----------------
+long       g_last_m5_open[8];           // last processed M5 bar open time per symbol slot
+string     g_last_sym[8];               // symbol for each slot
+int        g_nslots = 0;
+string     g_used_setups[];             // setup keys already traded (persisted to file)
+int        g_nused = 0;
+datetime   g_day_start_equity = 0;      // equity snapshot at the daily reset boundary
+double     g_day_start_equity_val = 0.0;
+string     g_trade_state_file()
+  {
+   return "TrendBot_state_" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)) + ".txt";
+  }
+
+void SaveTradeState()
+  {
+   int h = FileOpen(g_trade_state_file(), FILE_WRITE | FILE_TXT | FILE_ANSI);
+   if(h == INVALID_HANDLE) return;
+   FileWriteLine(h, IntegerToString((long)g_day_start_equity));
+   FileWriteLine(h, DoubleToString(g_day_start_equity_val, 8));
+   for(int i = 0; i < g_nused; i++)
+      FileWriteLine(h, g_used_setups[i]);
+   FileClose(h);
+  }
+
+void LoadTradeState()
+  {
+   int h = FileOpen(g_trade_state_file(), FILE_READ | FILE_TXT | FILE_ANSI);
+   if(h == INVALID_HANDLE) return;
+   if(!FileIsEnding(h)) g_day_start_equity = (long)StringToInteger(FileReadLine(h));
+   if(!FileIsEnding(h)) g_day_start_equity_val = StringToDouble(FileReadLine(h));
+   while(!FileIsEnding(h))
+     {
+      string s = FileReadLine(h);
+      if(s == "") continue;
+      ArrayResize(g_used_setups, g_nused + 1);
+      g_used_setups[g_nused++] = s;
+     }
+   FileClose(h);
+   if(g_day_start_equity_val > 0.0)
+      g_day_start_equity = (long)g_rt.reset_utc_offset_seconds * 0 + g_day_start_equity; // keep stored boundary
+  }
+
+bool SetupUsed(const string key)
+  {
+   for(int i = 0; i < g_nused; i++)
+      if(g_used_setups[i] == key) return true;
+   return false;
+  }
+
+void MarkSetupUsed(const string key)
+  {
+   if(SetupUsed(key)) return;
+   ArrayResize(g_used_setups, g_nused + 1);
+   g_used_setups[g_nused++] = key;
+   if(g_nused > 4000)                       // prune oldest: keep the most recent 2000
+     {
+      int keep = 2000;
+      for(int i = 0; i < keep; i++)
+         g_used_setups[i] = g_used_setups[g_nused - keep + i];
+      g_nused = keep;
+      ArrayResize(g_used_setups, keep);
+     }
+   SaveTradeState();
+  }
+
+//--- reliable new-bar detection on CLOSED candles only. Returns the most recently
+//--- CLOSED M5 bar's open time (index 1 - the forming bar at index 0 is never used).
+//--- Bar identity = symbol + timeframe + bar open time: NewClosedBar() below guarantees
+//--- each closed bar is evaluated EXACTLY ONCE, immune to multiple ticks. After an EA
+//--- restart the first sighting only re-syncs the baseline (no blind trade), and the
+//--- persisted SetupUsed() memory blocks any duplicate order for an already-handled setup.
+long ClosedBarTimeframe(const string sym, const ENUM_TIMEFRAMES tf)
+  {
+   datetime t1 = iTime(sym, tf, 1);        // index 1 = the most recently CLOSED bar
+   if(t1 == 0) return 0;
+   return (long)t1;
+  }
+
+bool NewClosedBar(const int slot, const string sym, const long open_t)
+  {
+   if(g_last_sym[slot] != sym)
+     {
+      g_last_sym[slot] = sym;
+      g_last_m5_open[slot] = open_t;       // first sighting: adopt as baseline, do not trade it blind
+      return false;
+     }
+   if(open_t == g_last_m5_open[slot]) return false;   // same candle: many ticks arrive here, evaluate ONCE
+   g_last_m5_open[slot] = open_t;
+   return true;
+  }
+
+int SlotFor(const string sym)
+  {
+   for(int i = 0; i < g_nslots; i++)
+      if(g_last_sym[i] == sym) return i;
+   if(g_nslots >= 8) return -1;
+   g_last_sym[g_nslots] = sym;
+   g_last_m5_open[g_nslots] = 0;
+   return g_nslots++;
+  }
+
+//--- load CLOSED bars only (shift starts at 1) into an MqlRates array, newest last
+bool LoadClosedBars(const string sym, const ENUM_TIMEFRAMES tf, const int want, MqlRates &rates[])
+  {
+   int have = Bars(sym, tf);
+   int n = MathMin(want, have - 1);          // exclude the forming bar entirely
+   if(n < 50) return false;
+   ArrayResize(rates, n);
+   for(int i = 0; i < n; i++)
+     {
+      // copy_rates_range is the reliable way to fetch historical closed bars
+      MqlRates tmp[1];
+      if(CopyRates(sym, tf, i + 1, 1, tmp) != 1) return false;
+      rates[n - 1 - i] = tmp[0];              // oldest first, engine expects chronological order
+     }
+   return true;
+  }
+
+void RunSymbol(const string sym)
+  {
+   if(!g_have_cfg || !ConfigFresh()) return;
+   if(g_paused || g_rt.kill_switch) return;
+   if(g_rt.core.mode == "SIGNAL_ONLY") return;   // gate still evaluates but no orders are ever sent
+   int slot = SlotFor(sym);
+   if(slot < 0) return;
+   long m5closed = ClosedBarTimeframe(sym, PERIOD_M5);
+   if(m5closed == 0) return;
+   if(!NewClosedBar(slot, sym, m5closed)) return; // the just-closed M5 bar was already evaluated (or is a baseline)
+
+   TB_Engine d1, h4, m15, m5;
+   TB_Params ep;
+   TB_DefaultParams(ep);
+   ep.point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   MqlRates rd[], rh[], r15[], r5[];
+   if(!LoadClosedBars(sym, PERIOD_D1, InpHistoryBars / 4, rd) ||
+      !LoadClosedBars(sym, PERIOD_H4, InpHistoryBars, rh) ||
+      !LoadClosedBars(sym, PERIOD_M15, InpHistoryBars, r15) ||
+      !LoadClosedBars(sym, PERIOD_M5, InpHistoryBars, r5))
+     { TB_QueueEvent("ENGINE_NOTE", "\"symbol\":\"" + TB_Esc(sym) + "\",\"note\":\"insufficient_history\""); return; }
+   d1.Run(rd, ArraySize(rd), ep);
+   h4.Run(rh, ArraySize(rh), ep);
+   m15.Run(r15, ArraySize(r15), ep);
+   m5.Run(r5, ArraySize(r5), ep);
+
+   TB_Scalp sc;
+   TB_ScalpParams sp = g_rt.scalp;
+   TB_SymbolSpec bspec;
+   if(TB_ReadSpec(sym, bspec)) sp.spread = bspec.spread;
+   sc.Run(d1, h4, m15, m5, sp);
+
+   // find the CANDIDATE emitted for the just-closed bar and act on it exactly once
+   TB_BrokerAcct acct;
+   TB_ReadBroker(acct);
+   for(int i = 0; i < sc.m_nsig; i++)
+     {
+      if(sc.m_sig[i].stype != "CANDIDATE") continue;
+      if(sc.m_sig[i].time != m5closed) continue;         // only the JUST-CLOSED bar triggers entry
+      string key = sym + "|M5|" + IntegerToString(m5closed) + "|" + sc.m_sig[i].reason + "|" +
+                   DoubleToString(sc.m_sig[i].price, 8) + "|" + DoubleToString(sc.m_sig[i].price2, 8);
+      bool rejected = false;
+      string why = "";
+      if(SetupUsed(key))
+        { rejected = true; why = "duplicate_setup"; }    // covers restart/reconnect/heartbeat retries
+      else
+        {
+         double entry = TB_QuotePrice(sym, sc.m_sig[i].dir);
+         if(entry <= 0.0) { rejected = true; why = "no_quote"; }
+         else
+           {
+            string chk = TB_TradeAllowed(g_rt, acct, bspec, ConfigFresh(), g_paused,
+                                         sc.m_sig[i].dir, entry, sc.m_sig[i].price, sc.m_sig[i].price3);
+            if(chk != "") { rejected = true; why = chk; }
+            else
+              {
+               // position sizing identical to Python sizing.py: budget -> lots, rounded DOWN
+               double risk_pct = g_rt.core.risk_percent;
+               double budget = acct.equity * risk_pct / 100.0;
+               // remaining-drawdown clamp mirrors drawdown.py next_trade_risk
+               if(g_rt.core.max_open_risk_percent > 0)
+                 {
+                  double maxopen = acct.equity * g_rt.core.max_open_risk_percent / 100.0;
+                  double used = OpenRiskMoney();
+                  budget = MathMin(budget, MathMax(0.0, maxopen - used));
+                 }
+               if(budget <= 0.0) { rejected = true; why = "remaining_drawdown_or_open_risk_exhausted"; }
+               else
+                 {
+                  double loss_per_lot = TB_LossPerLot(bspec, MathAbs(entry - sc.m_sig[i].price2));
+                  if(loss_per_lot <= 0.0) { rejected = true; why = "loss_per_lot_zero"; }
+                  else
+                    {
+                     double lots = TB_NormalizeLots(bspec, budget / loss_per_lot);
+                     if(lots <= 0.0) { rejected = true; why = "min_lot_exceeds_risk_budget"; }
+                     else if(!TB_MarginOk(sym, sc.m_sig[i].dir, lots, entry, acct.free_margin))
+                        { rejected = true; why = "insufficient_margin"; }
+                     else
+                       {
+                        // basket target: TP = entry + dir * target_multiplier * stop distance (shared budget, NOT per-position full risk)
+                        double tp = sc.m_sig[i].price3;
+                        string comment = "TB|" + IntegerToString(m5closed) + "|" + sc.m_sig[i].reason;
+                        double fill = 0.0;
+                        string rsn = "";
+                        long ticket = TB_SendMarket(sym, sc.m_sig[i].dir, lots, sc.m_sig[i].price2, tp,
+                                                    comment, InpDeviationPoints, g_rt.magic, bspec.digits, fill, rsn);
+                        if(ticket <= 0) { rejected = true; why = rsn; }
+                        else
+                          {
+                           MarkSetupUsed(key);
+                           string ev = "\"symbol\":\"" + TB_Esc(sym) + "\",\"ticket\":" + IntegerToString(ticket) +
+                                       ",\"dir\":" + IntegerToString(sc.m_sig[i].dir) + ",\"lots\":" + DoubleToString(lots, 8) +
+                                       ",\"entry\":" + DoubleToString(fill, bspec.digits) +
+                                       ",\"sl\":" + DoubleToString(sc.m_sig[i].price2, bspec.digits) +
+                                       ",\"tp\":" + DoubleToString(tp, bspec.digits) +
+                                       ",\"risk_money\":" + DoubleToString(TB_PositionRiskMoney(bspec, fill, sc.m_sig[i].price2, lots), 2) +
+                                       ",\"setup\":\"" + TB_Esc(sc.m_sig[i].reason) + "\",\"bar\":" + IntegerToString(m5closed);
+                           TB_QueueEvent("ORDER_FILLED", ev);
+                           Print("TrendBot: ORDER ", (sc.m_sig[i].dir == 1 ? "BUY " : "SELL "), sym, " ", lots,
+                                 " @ ", fill, " ticket ", ticket);
+                          }
+                       }
+                  }
+              }
+         }
+        }
+      if(rejected)
+        {
+         MarkSetupUsed(key);   // a rejected setup must never be retried on a later tick/bar either
+         TB_QueueEvent("TRADE_BLOCKED", "\"symbol\":\"" + TB_Esc(sym) + "\",\"reason\":\"" + TB_Esc(why) +
+                      "\",\"bar\":" + IntegerToString(m5closed) + ",\"setup_kind\":\"" + TB_Esc(sc.m_sig[i].reason) + "\"");
+         Print("TrendBot: TRADE BLOCKED ", sym, " reason=", why);
+        }
+     }
+  }
+
+//--- floating risk of OUR open positions (magic-filtered): mirrors executor.open_risk_total
+double OpenRiskMoney()
+  {
+   double total = 0.0;
+   for(int p = PositionsTotal() - 1; p >= 0; p--)
+     {
+      ulong tk = PositionGetTicket(p);
+      if(tk == 0) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != g_rt.magic) continue;
+      string sym = PositionGetString(POSITION_SYMBOL);
+      TB_SymbolSpec s;
+      if(!TB_ReadSpec(sym, s)) continue;
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl    = PositionGetDouble(POSITION_SL);
+      double lots  = PositionGetDouble(POSITION_VOLUME);
+      if(sl <= 0.0) continue;
+      total += TB_PositionRiskMoney(s, entry, sl, lots);
+     }
+   return total;
+  }
+
+//--- basket management on live positions: break-even move when configured trigger reached
+void ManageOpenPositions()
+  {
+   if(!g_have_cfg) return;
+   for(int p = PositionsTotal() - 1; p >= 0; p--)
+     {
+      ulong tk = PositionGetTicket(p);
+      if(tk == 0) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != g_rt.magic) continue;
+      if(g_rt.be_method == "off" || g_rt.be_trigger_r <= 0.0) continue;   // "A"/"B"/"C" are the enabled methods
+      string sym = PositionGetString(POSITION_SYMBOL);
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl    = PositionGetDouble(POSITION_SL);
+      double cur   = PositionGetDouble(POSITION_PRICE_CURRENT);
+      long   ptype = PositionGetInteger(POSITION_TYPE);
+      int    dir   = (ptype == POSITION_TYPE_BUY) ? 1 : -1;
+      double risk  = MathAbs(entry - sl);
+      if(risk <= 0.0) continue;
+      double progress = ((dir == 1) ? (cur - entry) : (entry - cur)) / risk;
+      if(progress >= g_rt.be_trigger_r)
+        {
+         TB_SymbolSpec s;
+         if(!TB_ReadSpec(sym, s)) continue;
+         double be = entry + dir * (double)g_rt.be_offset_points * s.point;
+         bool already_be = (dir == 1) ? (sl >= entry) : (sl <= entry);
+         if(!already_be)
+           {
+            string rsn = "";
+            if(TB_ModifySL((long)tk, g_rt.magic, be, s.digits, rsn))
+               TB_QueueEvent("BE_APPLIED", "\"symbol\":\"" + TB_Esc(sym) + "\",\"ticket\":" + IntegerToString((long)tk) +
+                             ",\"new_sl\":" + DoubleToString(be, s.digits));
+           }
+        }
+     }
+  }
+
 //--- the configuration is only trusted while the backend keeps confirming it
 bool ConfigFresh()
   {
@@ -54,10 +350,34 @@ string HeartbeatBody()
         ",\"balance\":" + Num(AccountInfoDouble(ACCOUNT_BALANCE)) + ",\"equity\":" + Num(AccountInfoDouble(ACCOUNT_EQUITY)) +
         ",\"free_margin\":" + Num(AccountInfoDouble(ACCOUNT_MARGIN_FREE)) + ",\"is_demo\":" + (isDemo ? "true" : "false") +
         ",\"currency\":\"" + TB_Esc(AccountInfoString(ACCOUNT_CURRENCY)) + "\"}";
-   b += ",\"state\":{\"paused\":" + (g_paused ? "true" : "false") + ",\"locked_out\":false,\"orders_enabled\":false" +
+   b += ",\"state\":{\"paused\":" + (g_paused ? "true" : "false") + ",\"locked_out\":false,\"orders_enabled\":" +
+        ((g_have_cfg && !g_paused && !g_rt.kill_switch && ConfigFresh() && g_rt.core.mode != "SIGNAL_ONLY") ? "true" : "false") +
         ",\"config_fresh\":" + (ConfigFresh() ? "true" : "false") + "}";
-   b += ",\"positions\":[]";
-   b += ",\"gate\":\"n/a\"";
+   // report OUR open positions so the backend/dashboard can show live broker state
+   string ps = "[";
+   bool firstp = true;
+   for(int p = PositionsTotal() - 1; p >= 0; p--)
+     {
+      ulong tk = PositionGetTicket(p);
+      if(tk == 0) continue;
+      if(g_rt.magic != 0 && PositionGetInteger(POSITION_MAGIC) != g_rt.magic) continue;
+      if(!firstp) ps += ",";
+      firstp = false;
+      ps += "{\"ticket\":" + IntegerToString((long)tk) +
+            ",\"symbol\":\"" + TB_Esc(PositionGetString(POSITION_SYMBOL)) + "\"" +
+            ",\"dir\":" + (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? "1" : "-1") +
+            ",\"lots\":" + Num(PositionGetDouble(POSITION_VOLUME), 2) +
+            ",\"entry\":" + Num(PositionGetDouble(POSITION_PRICE_OPEN), 5) +
+            ",\"current\":" + Num(PositionGetDouble(POSITION_PRICE_CURRENT), 5) +
+            ",\"sl\":" + Num(PositionGetDouble(POSITION_SL), 5) +
+            ",\"tp\":" + Num(PositionGetDouble(POSITION_TP), 5) +
+            ",\"pl\":" + Num(PositionGetDouble(POSITION_PROFIT), 2) +
+            ",\"open_time\":" + IntegerToString((long)PositionGetInteger(POSITION_TIME)) +
+            ",\"magic\":" + IntegerToString(PositionGetInteger(POSITION_MAGIC)) +
+            ",\"comment\":\"" + TB_Esc(PositionGetString(POSITION_COMMENT)) + "\"}";
+     }
+   b += ",\"positions\":" + ps + "]";
+   b += ",\"gate\":\"ea_v2\"";
    ulong now = GetTickCount64();
    if(g_last_sym_ms == 0 || now - g_last_sym_ms > 600000)      // symbols on the first beat, then every 10 minutes
      {
@@ -128,8 +448,34 @@ void HandleCommand(const string id, const string kind)
       else if(!TB_AccountAllowed(g_rt, (long)AccountInfoInteger(ACCOUNT_LOGIN))) detail = "refused: account is not in allowed_logins";
       else { g_paused = false; ok = true; detail = "resumed (safety checks passed)"; }
      }
-   else if(kind == "CLOSE_POSITION")
-      detail = "not available: this EA version has no trading functions";
+   else if(kind == "CLOSE_POSITION" || kind == "POSITION_ACTION")
+     {
+      // dashboard close commands arrive as POSITION_ACTION with an embedded ticket; tolerate both shapes
+      long tk = CommandTicket(id);
+      if(tk <= 0) detail = "refused: no valid ticket in command";
+      else
+        {
+         string rsn = "";
+         if(TB_CloseTicket(tk, g_rt.magic, rsn)) { ok = true; detail = "closed ticket " + IntegerToString(tk); }
+         else detail = "close failed: " + rsn;
+        }
+     }
+   else if(kind == "CLOSE_BASKET" || kind == "CLOSE_ALL")
+     {
+      int n = 0;
+      string fails = "";
+      for(int p = PositionsTotal() - 1; p >= 0; p--)
+        {
+         ulong tki = PositionGetTicket(p);
+         if(tki == 0) continue;
+         if(PositionGetInteger(POSITION_MAGIC) != g_rt.magic) continue;
+         string rsn = "";
+         if(TB_CloseTicket((long)tki, g_rt.magic, rsn)) n++;
+         else fails += IntegerToString((long)tki) + ":" + rsn + ";";
+        }
+      ok = (n > 0 && fails == "");
+      detail = "closed " + IntegerToString(n) + " positions" + (fails != "" ? (" failures[" + fails + "]") : "");
+     }
    else if(kind == "SHUTDOWN")
      { ok = true; detail = "EA removing itself"; }
    else
@@ -144,6 +490,28 @@ void HandleCommand(const string id, const string kind)
       TB_FlushEvents(InpBackendUrl, g_secret, e);
       ExpertRemove();
      }
+  }
+
+//--- small side table: command_id -> embedded ticket (dashboard close commands)
+string g_cmd_ids[64];
+long   g_cmd_tix[64];
+int    g_ncmds = 0;
+
+void RememberCommandTicket(const string id, const long tk)
+  {
+   for(int i = 0; i < g_ncmds; i++)
+      if(g_cmd_ids[i] == id) { g_cmd_tix[i] = tk; return; }
+   if(g_ncmds >= 64) return;
+   g_cmd_ids[g_ncmds] = id;
+   g_cmd_tix[g_ncmds] = tk;
+   g_ncmds++;
+  }
+
+long CommandTicket(const string id)
+  {
+   for(int i = 0; i < g_ncmds; i++)
+      if(g_cmd_ids[i] == id) return g_cmd_tix[i];
+   return 0;
   }
 
 void Heartbeat()
@@ -167,7 +535,12 @@ void Heartbeat()
    for(int i = 0; i < j.Count(cmds); i++)
      {
       int c = j.At(cmds, i);
-      HandleCommand(j.Str(j.Member(c, "command_id")), j.Str(j.Member(c, "kind")));
+      // remember the ticket carried by POSITION_ACTION commands so HandleCommand can act on it
+      string cid = j.Str(j.Member(c, "command_id"));
+      int tkt = j.Member(c, "ticket");
+      long tk = (tkt >= 0) ? (long)j.Num(tkt) : 0;
+      RememberCommandTicket(cid, tk);
+      HandleCommand(cid, j.Str(j.Member(c, "kind")));
      }
   }
 
@@ -219,8 +592,9 @@ int OnInit()
          g_applied_hash = saved.config_hash;
         }
      }
+   LoadTradeState();                            // duplicate-setup memory survives EA restarts
    EventSetTimer(1);
-   TB_QueueEvent("EA_STARTED", "\"version\":\"1.000\"");
+   TB_QueueEvent("EA_STARTED", "\"version\":\"2.000\",\"trading_enabled\":true");
    return INIT_SUCCEEDED;
   }
 
@@ -255,5 +629,20 @@ void OnTimer()
 
 void OnTick()
   {
-   // PHASE 1: nothing to do. Signal detection and (later) order logic arrive in later phases.
+   // candle-close execution: evaluate the JUST-CLOSED M5 bar exactly once per symbol, then manage positions
+   if(!g_have_cfg || g_paused || g_rt.kill_switch) return;
+   if(g_rt.core.mode == "SIGNAL_ONLY") return;
+   string syms[];
+   int n = 0;
+   for(int i = 0; i < SymbolsTotal(true); i++)
+     {
+      string nm = SymbolName(i, true);            // Market Watch symbols only
+      if(nm == "") continue;
+      ArrayResize(syms, n + 1);
+      syms[n++] = nm;
+      if(n >= 8) break;                            // matches the 8 evaluation slots
+     }
+   for(int i = 0; i < n; i++)
+      RunSymbol(syms[i]);
+   ManageOpenPositions();
   }
