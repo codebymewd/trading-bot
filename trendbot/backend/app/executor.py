@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Protocol, Set, Tuple
 from . import basket_manager as bm
 from .basket import basket_budget
 from .config_schema import InstrumentState, Mode, SystemConfig
+from .drawdown import clamp_budget, drawdown_state
 from .portfolio import portfolio_check
 from .propguard import PropState, prop_check
 from .sizing import BasketPlan, PlannedPosition, SymbolSpec, loss_per_lot, plan_basket
@@ -27,6 +28,11 @@ from .trading_day import DailyCounters, parse_hhmm, resolve_fixed_offset
 LIVE_TRADING_AVAILABLE = False          # live execution stays disabled until demo validation is complete
 RISK_BREACH_TOLERANCE = 0.10            # actual risk after fills may exceed the budget by at most 10%
 MAX_SIGNAL_AGE_SECONDS = 20             # a candidate older than this (after its M5 bar closed) is stale
+
+
+def open_risk_total(open_baskets) -> float:
+    """Worst-case money currently at risk across all open baskets (their stops)."""
+    return sum(bm.open_risk_money(b) for b in open_baskets if b.status == "OPEN")
 
 
 # ------------------------------------------------------------------ broker protocol & value objects
@@ -218,8 +224,21 @@ def run_gate(c: GateContext) -> GateResult:
         lost = (c.day_start_equity - acct.equity) / c.day_start_equity * 100.0
         if lost >= cfg.daily.daily_loss_limit_percent:
             return no("daily_loss_limit")
+    # ---- remaining-drawdown-aware risk --------------------------------------
+    # The budget is NEVER simply equity x risk% when a prop profile is active: it is clamped to
+    # the drawdown headroom that is actually left (open baskets' worst case already consumes it).
+    # Risk is never silently increased; over-capacity is rejected (or reduced only if the user
+    # explicitly enabled over_capacity_policy='reduce').
+    active_profile = cfg.prop_profiles.get(cfg.active_prop_profile) if cfg.active_prop_profile else None
+    dd = drawdown_state(active_profile, balance=acct.balance, equity=acct.equity,
+                        day_start_balance=(c.prop.day_start_balance if c.prop else acct.balance),
+                        high_water=(c.prop.high_water if c.prop else max(acct.balance, acct.equity)),
+                        open_risk_money=open_risk_total(c.store.open_baskets()))
     budget = basket_budget(acct.equity, cfg)
-    plan = plan_basket(spec, cand.direction, live_entry, cand.sl, budget.risk_money,
+    risk_money, why = clamp_budget(cfg, dd, budget.risk_money)
+    if why:
+        return no(why)
+    plan = plan_basket(spec, cand.direction, live_entry, cand.sl, risk_money,
                        cfg.scalp.max_positions_per_basket, cfg.scalp.risk_split, cfg.scalp.target_multiplier,
                        free_margin=None)
     if not plan.ok:
