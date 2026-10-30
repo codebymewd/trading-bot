@@ -1,0 +1,205 @@
+{
+  "schema_version": 3,
+  "config_version": 1,
+  "mode": "SIGNAL_ONLY",
+  "live_confirmed": false,
+  "magic_number": 240001,
+  "risk": {
+    "risk_percent": 1.0,
+    "over_capacity_policy": "reject",
+    "include_commission_in_risk": true,
+    "max_open_risk_percent": 1.0,
+    "max_simultaneous_positions": 1,
+    "max_slippage_points": 30
+  },
+  "scalp": {
+    "target_multiplier": 3.0,
+    "scalp_window_minutes": 15,
+    "timeout_action": "CLOSE_ALL",
+    "max_positions_per_basket": 1,
+    "risk_split": "equal",
+    "basket_max_loss_percent": null,
+    "max_spread_to_stop_ratio": 0.15
+  },
+  "confirmation": {
+    "price_action_mandatory": true,
+    "enabled_indicators": [
+      "RSI",
+      "MACD",
+      "BB",
+      "STOCH"
+    ],
+    "minimum_confirmations": 3,
+    "params": {
+      "rsi_period": 14,
+      "rsi_midline": 50.0,
+      "macd_fast": 12,
+      "macd_slow": 26,
+      "macd_signal": 9,
+      "stoch_k": 14,
+      "stoch_d": 3,
+      "stoch_slowing": 3,
+      "bb_period": 20,
+      "bb_deviation": 2.0,
+      "cci_period": 14,
+      "cci_threshold": 100.0
+    }
+  },
+  "break_even": {
+    "method": "off",
+    "trigger_r": 1.0,
+    "partial_close_percent": 0.0,
+    "be_offset_points": 0,
+    "trailing_enabled": false,
+    "trailing_atr_mult": 1.5
+  },
+  "daily": {
+    "max_trades_per_day": 2,
+    "count_unit": "basket",
+    "lockout_after_losses": 2,
+    "max_consecutive_losses": null,
+    "daily_loss_limit_percent": null,
+    "be_tolerance_money": 0.0,
+    "reset_time": "00:00",
+    "reset_timezone": "Africa/Lagos"
+  },
+  "schedule": {
+    "timezone": "Africa/Lagos",
+    "analysis_start": "00:00",
+    "entry_cutoff": "21:00",
+    "forced_close_time": null,
+    "manage_positions_after_cutoff": true
+  },
+  "news": {
+    "low": {
+      "allow_entries": true,
+      "pre_window_min": 0,
+      "post_window_min": 0,
+      "extra_spread_check": false,
+      "extra_volatility_check": false
+    },
+    "medium": {
+      "allow_entries": true,
+      "pre_window_min": 5,
+      "post_window_min": 5,
+      "extra_spread_check": true,
+      "extra_volatility_check": true
+    },
+    "high": {
+      "allow_entries": false,
+      "pre_window_min": 30,
+      "post_window_min": 15,
+      "extra_spread_check": true,
+      "extra_volatility_check": true
+    },
+    "permitted_high_impact_event_types": [],
+    "hold_positions_through_news": true,
+    "close_before_high_impact": false,
+    "data_stale_after_minutes": 60,
+    "on_data_unavailable": "block"
+  },
+  "volatility": {
+    "atr_period": 14,
+    "baseline_lookback_bars": 200,
+    "elevated_ratio": 1.5,
+    "extreme_ratio": 2.5,
+    "allowed_states": [
+      "normal",
+      "elevated"
+    ],
+    "max_spread_atr_ratio": 0.15
+  },
+  "portfolio": {
+    "correlation_lookback_bars": 100,
+    "correlation_block_threshold": 0.8,
+    "block_on_shared_currency_exposure": true
+  },
+  "structure": {
+    "swing_left": 3,
+    "swing_right": 3,
+    "min_swing_atr": 0.5,
+    "bos_close_buffer_atr": 0.05,
+    "disp_body_atr": 1.2,
+    "disp_body_ratio": 0.6,
+    "disp_max_bars": 3,
+    "max_entry_range_pct": 50.0,
+    "htf_mode": "H4_AND_D1",
+    "execution_tf": "M5",
+    "setup_tf": "M15"
+  },
+  "liquidity": {
+    "eq_tolerance_atr": 0.1,
+    "sweep_min_pierce_atr": 0.05,
+    "sweep_confirm_bars": 2,
+    "sweep_required": false,
+    "trap_bars": 3,
+    "failed_cont_bars": 3
+  },
+  "fvg": {
+    "min_atr": 0.2,
+    "min_points": 0,
+    "max_age_bars": 48,
+    "mitigation": "full"
+  },
+  "entry": {
+    "entry_mode": "market_confirmed",
+    "sl_buffer_atr": 0.1,
+    "min_sl_atr": 0.3,
+    "max_sl_atr": 3.0,
+    "setup_max_bars": 24,
+    "max_chase_r": 0.5
+  },
+  "asset_class_params": {},
+  "instruments": {
+    "mode": "watchlist",
+    "watchlist": [
+      {
+        "symbol": "XAUUSD",
+        "broker_symbol": null,
+        "asset_class": "metals",
+        "state": "MONITORED",
+        "enabled": true
+      },
+      {
+        "symbol": "GBPUSD",
+        "broker_symbol": null,
+        "asset_class": "forex",
+        "state": "MONITORED",
+        "enabled": true
+      },
+      {
+        "symbol": "BTCUSD",
+        "broker_symbol": null,
+        "asset_class": "crypto",
+        "state": "MONITORED",
+        "enabled": true
+      }
+    ],
+    "auto_scan_asset_classes": [
+      "forex",
+      "metals",
+      "crypto"
+    ],
+    "exclude_unvalidated": true,
+    "ranking_policy": "score",
+    "per_instrument_max_risk_percent": null
+  },
+  "prop_profiles": {},
+  "active_prop_profile": null,
+  "safety": {
+    "stale_config_seconds": 300,
+    "heartbeat_seconds": 10,
+    "kill_switch": false
+  },
+  "broker": {
+    "name": "Exness",
+    "symbol_discovery": "terminal"
+  },
+  "derived": {
+    "reset_utc_offset_seconds": 3600,
+    "reset_minutes": 0,
+    "schedule_utc_offset_seconds": 3600,
+    "scalp_window_seconds": 900
+  },
+  "config_hash": "d58b952285b7a4596d34125a5662f7af96d965133e91ee81c3993b5caa1d3aad"
+}
