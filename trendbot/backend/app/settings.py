@@ -50,6 +50,8 @@ SETTINGS: Dict[str, Setting] = {s.key: s for s in [
     Setting("news_missing", "If news data is missing", ("news", "on_data_unavailable"), "enum", choices=("block", "allow"), always_confirm=True),
     Setting("trades_day", "Baskets per day", ("daily", "max_trades_per_day"), "int", presets=(1, 2, 3), confirm_on_increase=True),
     Setting("daily_loss", "Daily loss limit", ("daily", "daily_loss_limit_percent"), "float", presets=(2.0, 3.0, 5.0), unit="%", confirm_on_increase=True),
+    # LIVE is intentionally NOT offered here: the executor hard-blocks it (LIVE_TRADING_AVAILABLE=False)
+    # until a completed DEMO forward test. See docs/STATUS.md for the unlock procedure.
     Setting("mode", "Trading mode", ("mode",), "enum", choices=("SIGNAL_ONLY", "DEMO"), always_confirm=True),
     Setting("gate", "Trend gate", ("structure", "htf_mode"), "enum", choices=("H4_AND_D1", "H4_ONLY"), always_confirm=True),
     Setting("profile", "Active prop-firm profile", ("active_prop_profile",), "enum", always_confirm=True),

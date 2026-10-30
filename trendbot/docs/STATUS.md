@@ -49,3 +49,25 @@ current account number and balance read-only.
 4. Check broker minimum lots against your account size (a $100 account cannot split risk across several positions on most symbols).
 5. Review the daily loss limit, lockout and prop-profile settings with the Telegram confirmation flow.
 6. Only then consider LIVE, which is intentionally unavailable in this version and requires an explicit code and configuration change after a documented demo period.
+
+## Trading mode: DEMO vs LIVE (v0.1)
+
+The system has three modes (`mode` in the config, changeable from Dashboard → Settings → Risk):
+
+| Mode | Behaviour |
+|------|-----------|
+| `SIGNAL_ONLY` (default) | Full safety gate runs; "would trade" reported; **no orders ever sent** |
+| `DEMO` | Real market orders via the EA — only on a demo MT5 account whose login is in `broker.allowed_logins` and matches the account's `mt5_login` |
+| `LIVE` | **Hard-blocked.** `executor.LIVE_TRADING_AVAILABLE = False`. The settings UI does not even offer it as a choice. |
+
+### How to switch SIGNAL_ONLY ↔ DEMO
+Dashboard → Settings → Risk → "Trading mode" → choose `DEMO` → confirm twice (always_confirm). The change goes through the normal propose → new version/hash → EA ack flow; it shows "Applied" only after the EA acknowledges.
+
+### Unlocking LIVE (deliberate multi-step procedure — do NOT rush this)
+1. Complete a documented DEMO forward test (minimum 4 weeks) with clean prop-drawdown behaviour.
+2. Set every instrument you intend to trade to state `LIVE_VALIDATED` in the config.
+3. In the config JSON set `"mode": "LIVE"` **and** `"live_confirmed": true`. Pydantic validation refuses LIVE otherwise.
+4. Only then flip `LIVE_TRADING_AVAILABLE = True` in `backend/app/executor.py` and restart the backend.
+5. The EA independently re-checks `ACCOUNT_TRADE_MODE` broker-side and will refuse to send live orders from a demo terminal (and vice-versa: DEMO mode refuses live accounts — reason code `demo_mode_on_live_account`).
+
+Until step 4 is done, any attempt to run LIVE is rejected at the gate with the exact reason `live_trading_not_available`, recorded in the activity feed and audit log.
