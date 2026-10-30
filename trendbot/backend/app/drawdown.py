@@ -59,11 +59,12 @@ def drawdown_state(profile: Optional[PropProfile], *, balance: float, equity: fl
     more basket after that open risk and the safety buffer are accounted for."""
     floating = equity - balance
     if profile is None:
+        # no prop profile -> no drawdown cap at all (inf, NOT 0: a zero here must never block)
         return DrawdownState(
             initial_balance=balance, balance=balance, equity=equity, floating_pl=floating,
-            max_drawdown_money=0.0, current_drawdown_money=0.0, remaining_drawdown_money=0.0,
+            max_drawdown_money=math.inf, current_drawdown_money=0.0, remaining_drawdown_money=math.inf,
             daily_loss_limit_money=None, daily_loss_used_money=0.0, daily_loss_remaining_money=None,
-            open_risk_money=open_risk_money, next_trade_risk_money=float("inf"))
+            open_risk_money=open_risk_money, next_trade_risk_money=math.inf)
     if not profile.confirmed or profile.unresolved_fields:
         # an incomplete profile must fail safe: no usable headroom at all
         return DrawdownState(
