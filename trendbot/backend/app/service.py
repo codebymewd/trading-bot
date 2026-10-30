@@ -17,6 +17,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from . import protocol
+from .accounts import AccountStore
+from .bar_close import BarGate
 from .config_schema import SystemConfig
 from .db import Db
 from .settings import ConfigManager
@@ -34,6 +36,7 @@ class Settings:
     db_path: str = ":memory:"
     webhook_secret: str = ""
     heartbeat_timeout: int = 45
+    dashboard_token: str = ""      # TB_DASHBOARD_TOKEN; empty => /api disabled (fail safe)
 
 
 class Service:
@@ -46,6 +49,10 @@ class Service:
         self.notifier = notifier
         self.throttle = AlertThrottle(clock)
         self.ea_online: Optional[bool] = None
+        # ---- multi-account + closed-candle infrastructure (Phase A/B wiring)
+        self.accounts = AccountStore(self.db, clock)
+        self.bar_gate = BarGate(self.db, clock)
+        self.store_path: Optional[str] = None   # legacy global BasketStore path (account "default")
 
     # ---- outbound
     def notify(self, text: str, key: Optional[str] = None) -> None:
@@ -70,21 +77,63 @@ class Service:
                  if body.get(k) is not None}
         state["ts"] = now
         self.db.kv_set("ea_state", state)
+        # ---- per-account routing: the EA reports its REAL MT5 login (ACCOUNT_INFO_LOGIN).
+        # We never trust manually entered info alone; verify_ea records ea_verified_login and
+        # refuses an EA whose reported login differs from the configured one.
+        acct_id = str(body.get("account_id") or "") or (self.db.kv_get("selected_account") or "default")
+        acc = self.accounts.get(acct_id)
+        if acc is None:
+            acct_body = body.get("account") or {}
+            login = int(acct_body.get("login") or 0) if isinstance(acct_body, dict) else 0
+            found = None
+            if login > 0:
+                for a in self.accounts.list():
+                    if a.mt5_login == login:
+                        found = a
+                        break
+            if found is not None:
+                acct_id = found.id
+            elif login > 0:
+                self.db.audit(now, "ea", "EA_UNKNOWN_ACCOUNT", {"reported_login": login, "requested": body.get("account_id")})
+        st = self.db.kv_get(f"acct_state:{acct_id}") or {}
+        merged = dict(st)
+        merged.update(state)
+        merged["online"] = True
+        self.db.kv_set(f"acct_state:{acct_id}", merged)
+        acct_body = body.get("account") or {}
+        if isinstance(acct_body, dict) and acct_body.get("login"):
+            verified = self.accounts.verify_ea(acct_id, int(acct_body["login"]))
+            if verified is None and (acc is None or acc.mt5_login is not None):
+                # identity mismatch: refuse to hand out trading config/commands to this EA
+                return {"server_time": now, "commands": [], "identity_error": "ea_login_mismatch"}
         if was is not True:
             self.event_alert({"type": "EA_CONNECTED"})
         resp = {"server_time": now, "commands": self.db.pending_commands(),
-                "stale_config_seconds": self.cfg.current.safety.stale_config_seconds}
+                "stale_config_seconds": self.cfg.current.safety.stale_config_seconds,
+                "account_id": acct_id}
         applied = int(body.get("applied_version") or 0)
         if applied < self.cfg.current.config_version:
             resp["config"] = self.cfg.current.ea_payload()
         return resp
 
     def check_ea_connection(self) -> None:
-        """Call periodically: raises ONE disconnect alert when heartbeats stop."""
+        """Call periodically: raises ONE disconnect alert when heartbeats stop.
+
+        Also marks per-account EA state offline: NO NEW TRADES while an account's EA is stale.
+        Existing broker-side SL/TP remain intact (the EA set them at the broker)."""
         st = self.db.kv_get("ea_state") or {}
         if st.get("ts") is not None and self.ea_online and self.clock() - st["ts"] > self.s.heartbeat_timeout:
             self.ea_online = False
             self.event_alert({"type": "EA_DISCONNECTED"})
+        now = self.clock()
+        for acc in self.accounts.list():
+            key = f"acct_state:{acc.id}"
+            a_st = self.db.kv_get(key) or {}
+            if a_st.get("online") and a_st.get("ts") and now - float(a_st["ts"]) > self.s.heartbeat_timeout:
+                a_st = dict(a_st)
+                a_st["online"] = False
+                self.db.kv_set(key, a_st)
+                self.db.audit(int(now), "system", "EA_STALE", {"account": acc.id})
 
     def events(self, body: dict) -> dict:
         new = dup = 0
@@ -116,9 +165,17 @@ class Service:
         self.send_replies(self.ctl.handle(update))
 
 
-def create_app(service: Service) -> FastAPI:
+def create_app(service: Service, dashboard_token_provider=None) -> FastAPI:
     app = FastAPI(title="TrendBot backend", docs_url=None, redoc_url=None)
     app.state.service = service
+
+    # Dashboard API (/api/* + static UI). Telegram is NOT in this control path.
+    try:
+        from .api import register_api
+        provider = dashboard_token_provider or (lambda: service.s.dashboard_token)
+        register_api(app, service, provider)
+    except Exception:      # fail safe: API simply unavailable, EA endpoints keep working
+        pass
 
     async def verified(request: Request, path: str):
         body = await request.body()
